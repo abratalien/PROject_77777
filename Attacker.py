@@ -52,7 +52,6 @@ def attack_0_unauthorized_mtls_bypass():
     raw_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         raw_socket.connect((RECEIVER_HOST, RECEIVER_PORT))
-        # Send raw dummy data without mTLS handshake
         raw_socket.sendall(b"\x00\x00\x00\x20" + b"A" * 32)
         print(
             "⚠️ [FAIL] Plain socket connected (Receiver failed to enforce"
@@ -73,7 +72,6 @@ def attack_1_replay_captured_packet(active_key):
     """ATTACK 1: Replay Attack (Injects Seq #1 for GTRE_GT_01)."""
     print("\n--- 💥 EXECUTING ATTACK 1: Replay Attack on GTRE_GT_01 ---")
     try:
-        # Passes Phase 8 mTLS using valid certs, but tests Phase 6 anti-replay gate
         sock = create_mtls_socket()
 
         replayed_payload = {
@@ -96,46 +94,56 @@ def attack_1_replay_captured_packet(active_key):
         print("📡 Injecting replayed packet (Seq #1) for GTRE_GT_01...")
         send_frame(sock, frame)
         sock.close()
+        print("✅ Replay packet injected.")
     except Exception as e:
         print(f"[-] Attack 1 failed: {e}")
 
 
-def attack_2_cross_node_spoofing(active_key):
-    """ATTACK 2: Spoofing Attack (Injects replayed Seq #1 claiming to be GTRE_GT_02)."""
+def attack_2_false_key_spoofing():
+    """ATTACK 2: False Key / Cross-Node Spoofing Attack.
+    Uses an INVALID key so decryption trial fails at Receiver.
+    """
     print(
-        "\n--- 💥 EXECUTING ATTACK 2: Cross-Node Identity Spoofing (GTRE_GT_02)"
+        "\n--- 💥 EXECUTING ATTACK 2: False Key / Identity Spoofing Injection"
         " ---"
     )
     try:
         sock = create_mtls_socket()
 
+        # False key that won't match any session key index 0-99
+        bogus_key = b"BAD_KEY_999999999999999999999999"
+
         spoofed_payload = {
-            "engine_id": "GTRE_GT_02",  # Spoofing Engine 02
-            "sequence_id": 1,  # Old sequence ID
+            "engine_id": "GTRE_GT_02",
+            "sequence_id": 1,
             "timestamp": time.time(),
-            "flight_phase": "SPOOF_INJECTION",
+            "flight_phase": "FALSE_KEY_INJECTION",
             "temperature_c": 999.9,
             "pressure_psi": 20.0,
             "rpm": 8000,
             "vibration_mms": 0.01,
         }
 
-        cipher = AES.new(active_key, AES.MODE_GCM)
+        cipher = AES.new(bogus_key, AES.MODE_GCM)
         ciphertext, auth_tag = cipher.encrypt_and_digest(
             json.dumps(spoofed_payload).encode()
         )
         frame = cipher.nonce + auth_tag + ciphertext
 
-        print("📡 Injecting spoofed identity payload for GTRE_GT_02 (Seq #1)...")
+        print("📡 Injecting payload encrypted with FALSE KEY...")
         send_frame(sock, frame)
         sock.close()
+        print("✅ False key packet injected.")
     except Exception as e:
         print(f"[-] Attack 2 failed: {e}")
 
 
-def attack_3_corrupt_ciphertext(active_key):
-    """ATTACK 3: Tampered Ciphertext Injection."""
-    print("\n--- 💥 EXECUTING ATTACK 3: Tampered Ciphertext Injection ---")
+def attack_3_corrupt_ciphertext_once(active_key):
+    """ATTACK 3: Single Data Tampering Attack (Corrupts Ciphertext)."""
+    print(
+        "\n--- 💥 EXECUTING ATTACK 3: Single Data Tampering Attack (One-Time"
+        " Bit-Flip) ---"
+    )
     try:
         sock = create_mtls_socket()
 
@@ -143,7 +151,7 @@ def attack_3_corrupt_ciphertext(active_key):
             "engine_id": "GTRE_GT_01",
             "sequence_id": 999,
             "timestamp": time.time(),
-            "flight_phase": "TAMPER_TEST",
+            "flight_phase": "SINGLE_TAMPER_TEST",
             "temperature_c": 700.0,
             "pressure_psi": 30.0,
             "rpm": 10000,
@@ -155,13 +163,14 @@ def attack_3_corrupt_ciphertext(active_key):
             json.dumps(valid_payload).encode()
         )
 
-        # Corrupt last byte of ciphertext
+        # Corrupt exactly the last byte of ciphertext (One-time tampering)
         corrupted_ciphertext = ciphertext[:-1] + b"\xFF"
         tampered_frame = cipher.nonce + auth_tag + corrupted_ciphertext
 
-        print("📡 Sending corrupted ciphertext frame to Receiver...")
+        print("📡 Injecting ONE tampered ciphertext frame to Receiver...")
         send_frame(sock, tampered_frame)
         sock.close()
+        print("✅ Single tampered packet injected.")
     except Exception as e:
         print(f"[-] Attack 3 failed: {e}")
 
@@ -169,21 +178,26 @@ def attack_3_corrupt_ciphertext(active_key):
 if __name__ == "__main__":
     print("⚠️ STARTING DEFENSIVE VALIDATION SUITE (Attacker.py)...")
 
-    # Match active key rotation index (e.g., index 4 for packets 20-25)
-    active_key = derive_session_key(MASTER_KEY, rotation_index=4)
+    # Match active key rotation index (e.g., index 0 for current session)
+    active_key = derive_session_key(MASTER_KEY, rotation_index=0)
 
+    # 1. Test Phase 8 mTLS Enforcement
     time.sleep(1)
-    # Test Phase 8 mTLS enforcement
     attack_0_unauthorized_mtls_bypass()
-    time.sleep(1)
 
-    # Test Phase 2, Phase 3, and Phase 6 protections over mTLS
+    # 2. Test Phase 6 Anti-Replay Defense
+    time.sleep(1)
     attack_1_replay_captured_packet(active_key)
+
+    # 3. Test Phase 7 False Key Defense
     time.sleep(1)
-    attack_2_cross_node_spoofing(active_key)
+    attack_2_false_key_spoofing()
+
+    # 4. Test Phase 2 Data Integrity Defense (Exactly ONCE)
     time.sleep(1)
-    attack_3_corrupt_ciphertext(active_key)
+    attack_3_corrupt_ciphertext_once(active_key)
 
     print(
-        "\n🏁 Attacker execution complete. Check Receiver.py output for logs."
+        "\n🏁 Attacker execution complete! All 4 attack vectors executed."
+        " Check Receiver.py output for defense logs."
     )
