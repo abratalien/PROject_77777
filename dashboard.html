@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GTRE Real-Time Engine Telemetry & Cyber-Physical Safety Monitor</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Rajdhani:wght@500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        aerospace: {
+                            950: '#070b14',
+                            900: '#0f172a',
+                            850: '#131e36',
+                            800: '#1e293b',
+                            700: '#334155',
+                            600: '#475569',
+                            cyan: '#38bdf8',
+                            emerald: '#10b981',
+                            amber: '#f59e0b',
+                            rose: '#f43f5e'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        display: ['Rajdhani', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace']
+                    },
+                    animation: {
+                        'pulse-fast': 'pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'glow-red': 'glowRed 1.2s ease-in-out infinite alternate',
+                        'glow-cyan': 'glowCyan 2s ease-in-out infinite alternate'
+                    },
+                    keyframes: {
+                        glowRed: {
+                            '0%': { boxShadow: '0 0 5px rgba(244, 63, 94, 0.4), inset 0 0 10px rgba(244, 63, 94, 0.2)' },
+                            '100%': { boxShadow: '0 0 22px rgba(244, 63, 94, 0.8), inset 0 0 18px rgba(244, 63, 94, 0.4)' }
+                        },
+                        glowCyan: {
+                            '0%': { boxShadow: '0 0 5px rgba(56, 189, 248, 0.3)' },
+                            '100%': { boxShadow: '0 0 18px rgba(56, 189, 248, 0.6)' }
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- Socket.IO Client JS -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        body {
+            background-color: #0b1120;
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(15, 23, 42, 0.9) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(14, 116, 144, 0.08) 0px, transparent 50%),
+                radial-gradient(at 50% 50%, rgba(15, 23, 42, 0.5) 0px, transparent 100%);
+            background-attachment: fixed;
+        }
+
+        .glass-card {
+            background: rgba(30, 41, 59, 0.72);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(71, 85, 105, 0.45);
+        }
+
+        .glass-card:hover {
+            border-color: rgba(100, 116, 139, 0.7);
+        }
+
+        .alert-card {
+            background: rgba(40, 16, 27, 0.85) !important;
+            border-color: rgba(244, 63, 94, 0.8) !important;
+            animation: glowRed 1.2s ease-in-out infinite alternate;
+        }
+
+        /* Custom scrollbars */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+
+        .tech-grid-pattern {
+            background-size: 30px 30px;
+            background-image: 
+                linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+        }
+    </style>
+</head>
+<body class="text-slate-100 font-sans min-h-screen tech-grid-pattern antialiased selection:bg-cyan-500 selection:text-white">
+
+    <!-- TOP SYSTEM STATUS & NOTIFICATION BANNER -->
+    <div id="masterAlertBanner" class="hidden transition-all duration-300 bg-rose-950/90 border-b border-rose-500/80 px-4 py-2.5 shadow-lg shadow-rose-950/50 backdrop-blur sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto flex items-center justify-between text-sm">
+            <div class="flex items-center space-x-3">
+                <span class="flex h-3 w-3 relative">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-3 w-3 bg-rose-500"></span>
+                </span>
+                <span class="font-display font-bold tracking-wider text-rose-200 uppercase">SAFETY INTEGRITY VIOLATION DETECTED</span>
+                <span class="text-slate-400">|</span>
+                <span id="masterAlertText" class="font-medium text-rose-300">Turbine conditions exceed critical operating envelope!</span>
+            </div>
+            <div class="text-xs font-mono text-rose-300/80 bg-rose-900/60 px-2.5 py-1 rounded border border-rose-500/40">
+                ACTION: IMMEDIATE THROTTLE DE-RATE
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN WRAPPER -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+        <!-- HEADER BAR -->
+        <header class="glass-card rounded-2xl p-5 shadow-2xl relative overflow-hidden">
+            <!-- Decorative Accent line -->
+            <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-cyan-500 via-indigo-500 to-rose-500"></div>
+
+            <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                <!-- Left: Title & Subtitle -->
+                <div class="flex items-center space-x-4">
+                    <div class="h-12 w-12 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-2xl shadow-lg shadow-cyan-500/20 ring-1 ring-cyan-400/40">
+                        ✈️
+                    </div>
+                    <div>
+                        <div class="flex items-center space-x-2">
+                            <h1 class="text-xl sm:text-2xl font-display font-bold tracking-wide text-white">
+                                GTRE Real-Time Engine Telemetry & Cyber-Physical Safety Monitor
+                            </h1>
+                            <span class="bg-cyan-500/10 text-cyan-400 text-xs font-mono px-2 py-0.5 rounded border border-cyan-500/30 uppercase tracking-widest hidden sm:inline-block">
+                                Phase 9
+                            </span>
+                        </div>
+                        <p class="text-xs sm:text-sm text-slate-400 mt-0.5 flex items-center gap-2">
+                            <span>Gas Turbine Research Establishment</span>
+                            <span>•</span>
+                            <span>Zero-Trust mTLS Telemetry Gateway</span>
+                            <span>•</span>
+                            <span class="font-mono text-slate-400">Endpoint: http://127.0.0.1:5001</span>
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Right: Badges & Live Status -->
+                <div class="flex flex-wrap items-center gap-3">
+                    <!-- Master Status Pill -->
+                    <div id="masterStatusBadge" class="flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 transition-colors">
+                        <span class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                        <span id="masterStatusText">ALL SYSTEMS NOMINAL</span>
+                    </div>
+
+                    <!-- Connection Status Badge -->
+                    <div id="connectionBadge" class="flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-mono font-medium bg-rose-500/10 text-rose-400 border border-rose-500/30 transition-all duration-300">
+                        <span id="connectionDot" class="h-2.5 w-2.5 rounded-full bg-rose-500 animate-pulse"></span>
+                        <span id="connectionText">DISCONNECTED</span>
+                    </div>
+
+                    <!-- UTC Live Clock -->
+                    <div class="px-3 py-1.5 rounded-lg bg-slate-900/80 border border-slate-700/60 font-mono text-xs text-slate-300 hidden md:flex items-center space-x-1.5 shadow-inner">
+                        <span class="text-slate-500">UTC</span>
+                        <span id="liveClock">00:00:00</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- TOP METRICS GRID (6 CARDS) -->
+        <section>
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+                
+                <!-- CARD 1: ACTIVE NODE -->
+                <div class="glass-card rounded-xl p-4 shadow-lg flex flex-col justify-between transition-all duration-200">
+                    <div class="flex items-center justify-between text-slate-400 text-xs font-medium uppercase tracking-wider">
+                        <span>Active Node</span>
+                        <span class="text-cyan-400 text-base">🛰️</span>
+                    </div>
+                    <div class="my-3">
+                        <div id="metric_engine_id" class="text-lg font-bold font-mono text-white tracking-tight truncate" title="Awaiting telemetry...">
+                            --
+                        </div>
+                        <div class="text-[11px] font-mono text-slate-400 mt-0.5">mTLS Secured</div>
+                    </div>
+                    <div class="text-[11px] text-slate-400 flex items-center justify-between border-t border-slate-700/60 pt-2">
+                        <span>Protocol</span>
+                        <span class="font-mono text-cyan-400">Phase 8 mTLS</span>
+                    </div>
+                </div>
+
+                <!-- CARD 2: FLIGHT PHASE -->
+                <div class="glass-card rounded-xl p-4 shadow-lg flex flex-col justify-between transition-all duration-200">
+                    <div class="flex items-center justify-between text-slate-400 text-xs font-medium uppercase tracking-wider">
+                        <span>Flight Phase</span>
+                        <span class="text-cyan-400 text-base">🛫</span>
+                    </div>
+                    <div class="my-3">
+                        <div id="metric_flight_phase" class="text-lg font-bold font-display tracking-wider text-cyan-300">
+                            STANDBY
+                        </div>
+                        <div class="text-[11px] text-slate-400 mt-0.5">Operational Regime</div>
+                    </div>
+                    <div class="text-[11px] text-slate-400 flex items-center justify-between border-t border-slate-700/60 pt-2">
+                        <span>State</span>
+                        <span id="phase_state_indicator" class="font-mono text-emerald-400">ENGAGED</span>
+                    </div>
+                </div>
+
+                <!-- CARD 3: SEQUENCE ID -->
+                <div class="glass-card rounded-xl p-4 shadow-lg flex flex-col justify-between transition-all duration-200">
+                    <div class="flex items-center justify-between text-slate-400 text-xs font-medium uppercase tracking-wider">
+                        <span>Sequence ID</span>
+                        <span class="text-cyan-400 text-base">🔢</span>
+                    </div>
+                    <div class="my-3">
+                        <div id="metric_sequence_id" class="text-2xl font-bold font-mono text-white">
+                            #0000
+                        </div>
+                        <div class="text-[11px] text-slate-400 mt-0.5">Anti-Replay Counter</div>
+                    </div>
+                    <div class="text-[11px] text-slate-400 flex items-center justify-between border-t border-slate-700/60 pt-2">
+                        <span>Integrity</span>
+                        <span class="font-mono text-emerald-400">Strict Order</span>
+                    </div>
+                </div>
+
+                <!-- CARD 4: TURBINE TEMPERATURE -->
+                <div id="card_temp" class="glass-card rounded-xl p-4 shadow-lg flex flex-col justify-between transition-all duration-300">
+                    <div class="flex items-center justify-between text-slate-400 text-xs font-medium uppercase tracking-wider">
+                        <span>Turbine Temp</span>
+                        <span class="text-amber-400 text-base">🔥</span>
+                    </div>
+                    <div class="my-2">
+                        <div class="flex items-baseline space-x-1">
+                            <span id="metric_temperature" class="text-2xl font-bold font-mono text-white">--</span>
+                            <span class="text-xs text-slate-400 font-mono">°C</span>
+                        </div>
+                        <!-- Mini Bar Indicator -->
+                        <div class="w-full bg-slate-700/60 h-1.5 rounded-full mt-2 overflow-hidden">
+                            <div id="bar_temperature" class="bg-emerald-400 h-full w-0 transition-all duration-300"></div>
+                        </div>
+                    </div>
+                    <div class="pt-2 border-t border-slate-700/60 flex items-center justify-between">
+                        <span class="text-[10px] text-slate-400 font-mono">LIM: 860.0°C</span>
+                        <span id="badge_temperature" class="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+                            NOMINAL
+                        </span>
+                    </div>
+                </div>
+
+                <!-- CARD 5: ENGINE RPM -->
+                <div id="card_rpm" class="glass-card rounded-xl p-4 shadow-lg flex flex-col justify-between transition-all duration-300">
+                    <div class="flex items-center justify-between text-slate-400 text-xs font-medium uppercase tracking-wider">
+                        <span>Engine RPM</span>
+                        <span class="text-indigo-400 text-base">⚡</span>
+                    </div>
+                    <div class="my-2">
+                        <div class="flex items-baseline space-x-1">
+                            <span id="metric_rpm" class="text-2xl font-bold font-mono text-white">--</span>
+                            <span class="text-xs text-slate-400 font-mono">RPM</span>
+                        </div>
+                        <!-- Mini Bar Indicator -->
+                        <div class="w-full bg-slate-700/60 h-1.5 rounded-full mt-2 overflow-hidden">
+                            <div id="bar_rpm" class="bg-indigo-400 h-full w-0 transition-all duration-300"></div>
+                        </div>
+                    </div>
+                    <div class="pt-2 border-t border-slate-700/60 flex items-center justify-between">
+                        <span class="text-[10px] text-slate-400 font-mono">LIM: 13,000</span>
+                        <span id="badge_rpm" class="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+                            NOMINAL
+                        </span>
+                    </div>
+                </div>
+
+                <!-- CARD 6: VIBRATION LEVEL -->
+                <div id="card_vib" class="glass-card rounded-xl p-4 shadow-lg flex flex-col justify-between transition-all duration-300">
+                    <div class="flex items-center justify-between text-slate-400 text-xs font-medium uppercase tracking-wider">
+                        <span>Vibration Level</span>
+                        <span class="text-cyan-400 text-base">〰️</span>
+                    </div>
+                    <div class="my-2">
+                        <div class="flex items-baseline space-x-1">
+                            <span id="metric_vibration" class="text-2xl font-bold font-mono text-white">--</span>
+                            <span class="text-xs text-slate-400 font-mono">mm/s</span>
+                        </div>
+                        <!-- Mini Bar Indicator -->
+                        <div class="w-full bg-slate-700/60 h-1.5 rounded-full mt-2 overflow-hidden">
+                            <div id="bar_vibration" class="bg-cyan-400 h-full w-0 transition-all duration-300"></div>
+                        </div>
+                    </div>
+                    <div class="pt-2 border-t border-slate-700/60 flex items-center justify-between">
+                        <span class="text-[10px] text-slate-400 font-mono">LIM: 0.050</span>
+                        <span id="badge_vibration" class="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+                            NOMINAL
+                        </span>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+        <!-- LIVE CHARTS ROW (2 SIDE-BY-SIDE CARDS) -->
+        <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+            <!-- CHART 1: TURBINE TEMPERATURE -->
+            <div class="glass-card rounded-2xl p-5 shadow-xl flex flex-col">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center space-x-2">
+                        <span class="text-rose-400 text-lg">📈</span>
+                        <div>
+                            <h2 class="text-base font-display font-bold tracking-wide text-white">
+                                Turbine Temperature Trend
+                            </h2>
+                            <p class="text-xs text-slate-400">Rolling window (last 20 packets) • Ceiling: 860.0 °C</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <span class="text-[11px] font-mono bg-slate-900/80 px-2 py-1 rounded text-slate-300 border border-slate-700/60">
+                            Current: <span id="chart_temp_current" class="text-cyan-400 font-bold">--</span> °C
+                        </span>
+                    </div>
+                </div>
+                <div class="relative flex-1 min-h-[260px] w-full">
+                    <canvas id="tempChart"></canvas>
+                </div>
+            </div>
+
+            <!-- CHART 2: ENGINE RPM -->
+            <div class="glass-card rounded-2xl p-5 shadow-xl flex flex-col">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center space-x-2">
+                        <span class="text-indigo-400 text-lg">📊</span>
+                        <div>
+                            <h2 class="text-base font-display font-bold tracking-wide text-white">
+                                Engine Rotational Velocity (RPM)
+                            </h2>
+                            <p class="text-xs text-slate-400">Rolling window (last 20 packets) • Ceiling: 13,000 RPM</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <span class="text-[11px] font-mono bg-slate-900/80 px-2 py-1 rounded text-slate-300 border border-slate-700/60">
+                            Current: <span id="chart_rpm_current" class="text-indigo-400 font-bold">--</span> RPM
+                        </span>
+                    </div>
+                </div>
+                <div class="relative flex-1 min-h-[260px] w-full">
+                    <canvas id="rpmChart"></canvas>
+                </div>
+            </div>
+
+        </section>
+
+        <!-- SECURITY SECTION: PHASE 9 CRYPTOGRAPHIC HASH CHAIN -->
+        <section class="glass-card rounded-2xl p-5 shadow-xl space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-slate-700/60 pb-3">
+                <div class="flex items-center space-x-3">
+                    <div class="h-9 w-9 rounded-lg bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
+                        🔒
+                    </div>
+                    <div>
+                        <h2 class="text-sm sm:text-base font-display font-bold tracking-wide text-white">
+                            Phase 9 Cryptographic Black Box Hash Chain Pointer
+                        </h2>
+                        <p class="text-xs text-slate-400">
+                            Immutable, SHA-256 Tamper-Evident Flight Data Recorder Pointer
+                        </p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-mono font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                        </svg>
+                        AUDIT LEDGER ACTIVE
+                    </span>
+                    <button id="copyHashBtn" onclick="copyCurrentHash()" class="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded text-xs font-mono transition flex items-center space-x-1.5 border border-slate-600">
+                        <span>📋</span>
+                        <span id="copyBtnText">Copy Pointer</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- TERMINAL STYLE HASH DISPLAY -->
+            <div class="bg-slate-950/90 rounded-xl p-4 border border-cyan-500/30 font-mono shadow-inner">
+                <div class="flex items-center justify-between text-xs text-slate-400 mb-2 border-b border-slate-800/80 pb-2">
+                    <div class="flex items-center space-x-2">
+                        <span class="h-2 w-2 rounded-full bg-cyan-400 animate-pulse"></span>
+                        <span class="text-cyan-400 uppercase tracking-wider font-semibold">Active Block Record Hash (SHA-256)</span>
+                    </div>
+                    <span class="text-slate-400 text-[11px]">Formula: SHA256(TelemetryPayload_JSON + PrevHash)</span>
+                </div>
+                <div class="flex items-center justify-between gap-4">
+                    <div id="hash_chain" class="text-xs sm:text-sm md:text-base text-cyan-300 font-mono break-all tracking-wide py-1 select-all">
+                        0000000000000000000000000000000000000000000000000000000000000000 (GENESIS POINTER - AWAITING TELEMETRY STREAM)
+                    </div>
+                </div>
+            </div>
+
+            <!-- RECENT AUDIT CHAIN BLOCKS STREAM -->
+            <div class="space-y-2">
+                <div class="text-xs font-medium text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                    <span>Recent Chained Flight Telemetry Records</span>
+                    <span class="text-[11px] font-mono text-slate-400">Total Verified: <span id="total_records_count" class="text-cyan-400">0</span></span>
+                </div>
+                <div class="overflow-x-auto rounded-lg border border-slate-800 bg-slate-950/50">
+                    <table class="w-full text-left text-xs font-mono">
+                        <thead class="bg-slate-900/80 text-slate-400 border-b border-slate-800 uppercase text-[10px]">
+                            <tr>
+                                <th class="py-2 px-3">Packet #</th>
+                                <th class="py-2 px-3">Flight Phase</th>
+                                <th class="py-2 px-3">Temperature</th>
+                                <th class="py-2 px-3">RPM</th>
+                                <th class="py-2 px-3">Vibration</th>
+                                <th class="py-2 px-3">Block Hash (SHA-256)</th>
+                                <th class="py-2 px-3 text-right">Integrity</th>
+                            </tr>
+                        </thead>
+                        <tbody id="hash_history_tbody" class="divide-y divide-slate-850 text-slate-300">
+                            <tr>
+                                <td colspan="7" class="py-4 text-center text-slate-400 font-sans italic">
+                                    Awaiting incoming telemetry packets to populate cryptographic ledger...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- FOOTER -->
+        <footer class="text-center text-xs text-slate-400 font-mono py-2">
+            GTRE Cyber-Physical Jet Engine Defense Telemetry System &copy; Phase 1-9 Architecture. Zero-Trust Hardware-Enforced Stream.
+        </footer>
+    </div>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        // ==========================================
+        // 1. SAFETY THRESHOLDS CONFIGURATION
+        // ==========================================
+        const LIMIT_TEMP_C = 860.0;
+        const LIMIT_RPM = 13000;
+        const LIMIT_VIB_MMS = 0.05;
+
+        const MAX_HISTORY_POINTS = 20;
+        let packetCounter = 0;
+        let currentRecordHash = "";
+
+        // ==========================================
+        // 2. LIVE CLOCK SETUP
+        // ==========================================
+        function updateClock() {
+            const now = new Date();
+            const timeStr = now.toISOString().substring(11, 19);
+            document.getElementById('liveClock').innerText = timeStr;
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        // ==========================================
+        // 3. CHART.JS INITIALIZATION
+        // ==========================================
+        const chartCommonOptions = {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            interaction: {
+                mode: 'index',
+                intersect: false,
+            },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    titleColor: '#38bdf8',
+                    bodyColor: '#f8fafc',
+                    borderColor: '#334155',
+                    borderWidth: 1,
+                    padding: 10,
+                    bodyFont: { family: 'JetBrains Mono', size: 12 },
+                    titleFont: { family: 'Rajdhani', size: 14, weight: 'bold' }
+                }
+            },
+            scales: {
+                x: {
+                    grid: { color: 'rgba(51, 65, 85, 0.25)', drawBorder: false },
+                    ticks: { color: '#64748b', font: { family: 'JetBrains Mono', size: 10 }, maxRotation: 0 }
+                },
+                y: {
+                    grid: { color: 'rgba(51, 65, 85, 0.25)', drawBorder: false },
+                    ticks: { color: '#64748b', font: { family: 'JetBrains Mono', size: 10 } }
+                }
+            }
+        };
+
+        // Temperature Chart
+        const tempCtx = document.getElementById('tempChart').getContext('2d');
+        const tempGradient = tempCtx.createLinearGradient(0, 0, 0, 240);
+        tempGradient.addColorStop(0, 'rgba(244, 63, 94, 0.35)');
+        tempGradient.addColorStop(1, 'rgba(244, 63, 94, 0.0)');
+
+        const tempChart = new Chart(tempCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: 'Turbine Temp (°C)',
+                        data: [],
+                        borderColor: '#f43f5e',
+                        backgroundColor: tempGradient,
+                        borderWidth: 2,
+                        tension: 0.35,
+                        fill: true,
+                        pointBackgroundColor: '#f43f5e',
+                        pointBorderColor: '#0f172a',
+                        pointBorderWidth: 1.5,
+                        pointRadius: 3,
+                        pointHoverRadius: 6
+                    },
+                    {
+                        label: 'Safety Ceiling (860°C)',
+                        data: [],
+                        borderColor: 'rgba(244, 63, 94, 0.6)',
+                        borderWidth: 1.5,
+                        borderDash: [5, 5],
+                        pointRadius: 0,
+                        fill: false
+                    }
+                ]
+            },
+            options: {
+                ...chartCommonOptions,
+                scales: {
+                    ...chartCommonOptions.scales,
+                    y: {
+                        ...chartCommonOptions.scales.y,
+                        suggestedMin: 500,
+                        suggestedMax: 950
+                    }
+                }
+            }
+        });
+
+        // RPM Chart
+        const rpmCtx = document.getElementById('rpmChart').getContext('2d');
+        const rpmGradient = rpmCtx.createLinearGradient(0, 0, 0, 240);
+        rpmGradient.addColorStop(0, 'rgba(99, 102, 241, 0.35)');
+        rpmGradient.addColorStop(1, 'rgba(99, 102, 241, 0.0)');
+
+        const rpmChart = new Chart(rpmCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: 'Engine RPM',
+                        data: [],
+                        borderColor: '#818cf8',
+                        backgroundColor: rpmGradient,
+                        borderWidth: 2,
+                        tension: 0.35,
+                        fill: true,
+                        pointBackgroundColor: '#818cf8',
+                        pointBorderColor: '#0f172a',
+                        pointBorderWidth: 1.5,
+                        pointRadius: 3,
+                        pointHoverRadius: 6
+                    },
+                    {
+                        label: 'Max RPM (13,000)',
+                        data: [],
+                        borderColor: 'rgba(239, 68, 68, 0.6)',
+                        borderWidth: 1.5,
+                        borderDash: [5, 5],
+                        pointRadius: 0,
+                        fill: false
+                    }
+                ]
+            },
+            options: {
+                ...chartCommonOptions,
+                scales: {
+                    ...chartCommonOptions.scales,
+                    y: {
+                        ...chartCommonOptions.scales.y,
+                        suggestedMin: 8000,
+                        suggestedMax: 14000
+                    }
+                }
+            }
+        });
+
+        // ==========================================
+        // 4. WEBSOCKET CONNECTION SETUP
+        // ==========================================
+        const socket = io('http://127.0.0.1:5001', {
+            transports: ['websocket', 'polling'],
+            reconnectionAttempts: Infinity,
+            reconnectionDelay: 1000
+        });
+
+        const connectionBadge = document.getElementById('connectionBadge');
+        const connectionDot = document.getElementById('connectionDot');
+        const connectionText = document.getElementById('connectionText');
+
+        socket.on('connect', () => {
+            console.log("✅ Successfully connected to GTRE Receiver Socket.IO backend!");
+            connectionBadge.className = 'flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-mono font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 transition-all duration-300';
+            connectionDot.className = 'h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse';
+            connectionText.innerText = 'CONNECTED (PORT 5001)';
+        });
+
+        socket.on('disconnect', () => {
+            console.warn("⚠️ Disconnected from GTRE Receiver backend.");
+            connectionBadge.className = 'flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-mono font-medium bg-rose-500/10 text-rose-400 border border-rose-500/30 transition-all duration-300';
+            connectionDot.className = 'h-2.5 w-2.5 rounded-full bg-rose-500 animate-pulse';
+            connectionText.innerText = 'DISCONNECTED (RECONNECTING...)';
+        });
+
+        socket.on('connect_error', (error) => {
+            console.error("Connection Error:", error);
+            connectionBadge.className = 'flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-mono font-medium bg-amber-500/10 text-amber-400 border border-amber-500/30 transition-all duration-300';
+            connectionDot.className = 'h-2.5 w-2.5 rounded-full bg-amber-400 animate-pulse';
+            connectionText.innerText = 'RECONNECTING...';
+        });
+
+        // ==========================================
+        // 5. TELEMETRY STREAM EVENT CONSUMER
+        // ==========================================
+        const recentAuditRecords = [];
+
+        socket.on('telemetry_update', function(data) {
+            packetCounter++;
+
+            // Extract telemetry metrics
+            const engineId = data.engine_id || "UNKNOWN_NODE";
+            const flightPhase = data.flight_phase || "NOMINAL";
+            const sequenceId = data.sequence_id !== undefined ? data.sequence_id : packetCounter;
+            const temp = typeof data.temperature_c === 'number' ? data.temperature_c : parseFloat(data.temperature_c);
+            const rpm = typeof data.rpm === 'number' ? data.rpm : parseInt(data.rpm);
+            const vib = typeof data.vibration_mms === 'number' ? data.vibration_mms : parseFloat(data.vibration_mms);
+            const recordHash = data.record_hash || "N/A";
+            currentRecordHash = recordHash;
+
+            // Update Metric 1: Active Node
+            document.getElementById('metric_engine_id').innerText = engineId;
+
+            // Update Metric 2: Flight Phase
+            const phaseEl = document.getElementById('metric_flight_phase');
+            phaseEl.innerText = flightPhase;
+            if (flightPhase.toUpperCase() === 'TAKEOFF' || flightPhase.toUpperCase() === 'CLIMB') {
+                phaseEl.className = 'text-lg font-bold font-display tracking-wider text-amber-400';
+            } else if (flightPhase.toUpperCase() === 'CRUISE') {
+                phaseEl.className = 'text-lg font-bold font-display tracking-wider text-cyan-400';
+            } else {
+                phaseEl.className = 'text-lg font-bold font-display tracking-wider text-slate-200';
+            }
+
+            // Update Metric 3: Sequence ID
+            document.getElementById('metric_sequence_id').innerText = '#' + sequenceId.toString().padStart(4, '0');
+
+            // Update Metric 4: Turbine Temperature
+            document.getElementById('metric_temperature').innerText = temp.toFixed(1);
+            const tempPercent = Math.min(Math.max((temp / 1000) * 100, 0), 100);
+            const barTemp = document.getElementById('bar_temperature');
+            barTemp.style.width = tempPercent + '%';
+
+            // Update Metric 5: Engine RPM
+            document.getElementById('metric_rpm').innerText = rpm.toLocaleString();
+            const rpmPercent = Math.min(Math.max((rpm / 15000) * 100, 0), 100);
+            const barRpm = document.getElementById('bar_rpm');
+            barRpm.style.width = rpmPercent + '%';
+
+            // Update Metric 6: Vibration Level
+            document.getElementById('metric_vibration').innerText = vib.toFixed(3);
+            const vibPercent = Math.min(Math.max((vib / 0.10) * 100, 0), 100);
+            const barVib = document.getElementById('bar_vibration');
+            barVib.style.width = vibPercent + '%';
+
+            // Safety Anomalies Tracking
+            const activeAlerts = [];
+
+            // Condition 1: Turbine Temperature Limit (860.0 °C)
+            const tempCard = document.getElementById('card_temp');
+            const tempBadge = document.getElementById('badge_temperature');
+            if (temp > LIMIT_TEMP_C) {
+                tempBadge.innerText = '🚨 OVERHEAT WARNING';
+                tempBadge.className = 'px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-rose-500/20 text-rose-300 border border-rose-500 animate-pulse-fast';
+                tempCard.classList.add('alert-card');
+                barTemp.className = 'bg-rose-500 h-full transition-all duration-300';
+                activeAlerts.push(`Turbine Overheat: ${temp.toFixed(1)}°C (Limit: ${LIMIT_TEMP_C}°C)`);
+            } else {
+                tempBadge.innerText = 'NOMINAL';
+                tempBadge.className = 'px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-emerald-500/20 text-emerald-400 border border-emerald-500/40';
+                tempCard.classList.remove('alert-card');
+                barTemp.className = 'bg-emerald-400 h-full transition-all duration-300';
+            }
+
+            // Condition 2: Engine RPM Limit (13,000 RPM)
+            const rpmCard = document.getElementById('card_rpm');
+            const rpmBadge = document.getElementById('badge_rpm');
+            if (rpm > LIMIT_RPM) {
+                rpmBadge.innerText = '🚨 OVERSPEED WARNING';
+                rpmBadge.className = 'px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-rose-500/20 text-rose-300 border border-rose-500 animate-pulse-fast';
+                rpmCard.classList.add('alert-card');
+                barRpm.className = 'bg-rose-500 h-full transition-all duration-300';
+                activeAlerts.push(`Engine Overspeed: ${rpm.toLocaleString()} RPM (Limit: ${LIMIT_RPM.toLocaleString()} RPM)`);
+            } else {
+                rpmBadge.innerText = 'NOMINAL';
+                rpmBadge.className = 'px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-emerald-500/20 text-emerald-400 border border-emerald-500/40';
+                rpmCard.classList.remove('alert-card');
+                barRpm.className = 'bg-indigo-400 h-full transition-all duration-300';
+            }
+
+            // Condition 3: Vibration Limit (0.05 mm/s)
+            const vibCard = document.getElementById('card_vib');
+            const vibBadge = document.getElementById('badge_vibration');
+            if (vib > LIMIT_VIB_MMS) {
+                vibBadge.innerText = '🚨 EXCESSIVE VIBRATION';
+                vibBadge.className = 'px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-rose-500/20 text-rose-300 border border-rose-500 animate-pulse-fast';
+                vibCard.classList.add('alert-card');
+                barVib.className = 'bg-rose-500 h-full transition-all duration-300';
+                activeAlerts.push(`Excessive Vibration: ${vib.toFixed(3)} mm/s (Limit: ${LIMIT_VIB_MMS} mm/s)`);
+            } else {
+                vibBadge.innerText = 'NOMINAL';
+                vibBadge.className = 'px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-emerald-500/20 text-emerald-400 border border-emerald-500/40';
+                vibCard.classList.remove('alert-card');
+                barVib.className = 'bg-cyan-400 h-full transition-all duration-300';
+            }
+
+            // Master Alarm Banner & Header System Health Status
+            const masterAlertBanner = document.getElementById('masterAlertBanner');
+            const masterAlertText = document.getElementById('masterAlertText');
+            const masterStatusBadge = document.getElementById('masterStatusBadge');
+            const masterStatusText = document.getElementById('masterStatusText');
+
+            if (activeAlerts.length > 0) {
+                masterAlertBanner.classList.remove('hidden');
+                masterAlertText.innerText = activeAlerts.join(' • ');
+                masterStatusBadge.className = 'flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/50 animate-pulse-fast';
+                masterStatusText.innerText = `CRITICAL ALERT (${activeAlerts.length})`;
+            } else {
+                masterAlertBanner.classList.add('hidden');
+                masterStatusBadge.className = 'flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30';
+                masterStatusText.innerText = 'ALL SYSTEMS NOMINAL';
+            }
+
+            // Update Cryptographic Hash Chain Pointer Display
+            const hashBox = document.getElementById('hash_chain');
+            hashBox.innerText = recordHash;
+
+            // ==========================================
+            // Update Rolling Charts
+            // ==========================================
+            const label = '#' + sequenceId;
+            document.getElementById('chart_temp_current').innerText = temp.toFixed(1);
+            document.getElementById('chart_rpm_current').innerText = rpm.toLocaleString();
+
+            // Temperature Chart Feed
+            tempChart.data.labels.push(label);
+            tempChart.data.datasets[0].data.push(temp);
+            tempChart.data.datasets[1].data.push(LIMIT_TEMP_C);
+
+            if (tempChart.data.labels.length > MAX_HISTORY_POINTS) {
+                tempChart.data.labels.shift();
+                tempChart.data.datasets[0].data.shift();
+                tempChart.data.datasets[1].data.shift();
+            }
+            tempChart.update('none');
+
+            // RPM Chart Feed
+            rpmChart.data.labels.push(label);
+            rpmChart.data.datasets[0].data.push(rpm);
+            rpmChart.data.datasets[1].data.push(LIMIT_RPM);
+
+            if (rpmChart.data.labels.length > MAX_HISTORY_POINTS) {
+                rpmChart.data.labels.shift();
+                rpmChart.data.datasets[0].data.shift();
+                rpmChart.data.datasets[1].data.shift();
+            }
+            rpmChart.update('none');
+
+            // ==========================================
+            // Update Recent Audit Records Table
+            // ==========================================
+            document.getElementById('total_records_count').innerText = packetCounter;
+            
+            recentAuditRecords.unshift({
+                sequence: sequenceId,
+                phase: flightPhase,
+                temp: temp.toFixed(1),
+                rpm: rpm,
+                vib: vib.toFixed(3),
+                hash: recordHash
+            });
+
+            if (recentAuditRecords.length > 5) {
+                recentAuditRecords.pop();
+            }
+
+            renderRecentRecordsTable();
+        });
+
+        function renderRecentRecordsTable() {
+            const tbody = document.getElementById('hash_history_tbody');
+            if (recentAuditRecords.length === 0) return;
+
+            tbody.innerHTML = recentAuditRecords.map((rec) => `
+                <tr class="hover:bg-slate-900/60 transition">
+                    <td class="py-2 px-3 text-cyan-400 font-bold">#${rec.sequence}</td>
+                    <td class="py-2 px-3 text-slate-300 font-display font-semibold">${rec.phase}</td>
+                    <td class="py-2 px-3 font-mono ${parseFloat(rec.temp) > LIMIT_TEMP_C ? 'text-rose-400 font-bold' : 'text-slate-300'}">${rec.temp}°C</td>
+                    <td class="py-2 px-3 font-mono ${rec.rpm > LIMIT_RPM ? 'text-rose-400 font-bold' : 'text-slate-300'}">${rec.rpm.toLocaleString()}</td>
+                    <td class="py-2 px-3 font-mono ${parseFloat(rec.vib) > LIMIT_VIB_MMS ? 'text-rose-400 font-bold' : 'text-slate-300'}">${rec.vib}</td>
+                    <td class="py-2 px-3 font-mono text-xs text-slate-400" title="${rec.hash}">
+                        <span class="text-cyan-400">${rec.hash.substring(0, 10)}</span>...<span class="text-cyan-400">${rec.hash.substring(rec.hash.length - 8)}</span>
+                    </td>
+                    <td class="py-2 px-3 text-right">
+                        <span class="inline-flex items-center text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 text-[10px]">
+                            CHAINED ✓
+                        </span>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        // ==========================================
+        // 6. COPY HASH HELPER
+        // ==========================================
+        function copyCurrentHash() {
+            if (!currentRecordHash || currentRecordHash === "N/A") {
+                alert("No active record hash available to copy yet.");
+                return;
+            }
+            navigator.clipboard.writeText(currentRecordHash).then(() => {
+                const btnText = document.getElementById('copyBtnText');
+                const original = btnText.innerText;
+                btnText.innerText = "Copied!";
+                setTimeout(() => {
+                    btnText.innerText = original;
+                }, 2000);
+            }).catch(err => {
+                console.error("Failed to copy hash:", err);
+            });
+        }
+    </script>
+</body>
+</html>
